@@ -1,7 +1,8 @@
 /**
- * Where Tomari lives on disk. The data dir holds config.json with the pairing token (created on
- * first run, mode 600), tomari.db the SQLite store, and bin/ the binaries the LaunchAgents run.
- * The overlay reads the token from here too (Sources/TomariCore/AgentConfig.swift).
+ * Where perch-terminal lives on disk, apart from an install of the original Perch. The data dir
+ * holds config.json with the pairing token (created on first run, mode 600), perch.db the SQLite
+ * store, and the pid files of bin/perch-up. The overlay reads the token from here too
+ * (Sources/TomariCore/AgentConfig.swift).
  */
 import { $ } from "bun";
 import { randomBytes } from "node:crypto";
@@ -12,25 +13,14 @@ import { PANEL_PORT } from "../../shared/protocol.ts";
 export const HOOK_PORT = 7777;
 
 const HOME = homedir();
-export const DATA_DIR = `${HOME}/Library/Application Support/tomari`;
-export const BIN_DIR = `${DATA_DIR}/bin`;
-export const LOG_DIR = `${HOME}/Library/Logs/tomari`;
-export const CLAUDE_SETTINGS = `${HOME}/.claude/settings.json`;
-/** The agent Tomari replaces: setup imports its pins and reuses its pairing token, so a paired Pi keeps working. */
-const CLAUDE_PANEL_DIR = `${HOME}/Library/Application Support/claude-panel`;
-export const CLAUDE_PANEL_DB = `${CLAUDE_PANEL_DIR}/panel.db`;
-export const CLAUDE_PANEL_CONFIG = `${CLAUDE_PANEL_DIR}/config.json`;
+export const DATA_DIR = `${HOME}/Library/Application Support/perch-terminal`;
+export const LOG_DIR = `${HOME}/Library/Logs/perch-terminal`;
+export const BACKUP_DIR = `${DATA_DIR}/backups`;
+/** Only sessions whose cwd is here or below are tracked; the hooks live in its project settings. */
+export const WORKSPACE = `${HOME}/cenco`;
+export const CLAUDE_SETTINGS = `${WORKSPACE}/.claude/settings.json`;
 export const CONFIG_FILE = `${DATA_DIR}/config.json`;
-export const DB_FILE = `${DATA_DIR}/tomari.db`;
-/** The overlay's defaults domain, where it keeps the strip's edge (Sources/TomariOverlay/StripController.swift). */
-export const OVERLAY_DEFAULTS = "com.elrincondeldev.tomari";
-/** Where Tomari lived while it was called Perch (0.1 and 0.2); setup moves it into the paths above. */
-export const PERCH = {
-  dataDir: `${HOME}/Library/Application Support/perch`,
-  logDir: `${HOME}/Library/Logs/perch`,
-  db: "perch.db",
-  defaults: "com.elrincondeldev.perch",
-};
+export const DB_FILE = `${DATA_DIR}/perch.db`;
 
 /**
  * WebSocket URLs other devices on the LAN can use to reach this Mac: its IPv4 addresses

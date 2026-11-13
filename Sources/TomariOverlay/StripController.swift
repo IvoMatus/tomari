@@ -109,7 +109,7 @@ final class StripController {
             let color = failure != nil ? failed : session.needsAttention ? NSColor(paint: .accent) : Style.muted
             return content(session.name, failure ?? session.statusLine(at: now), color, beside: layout.cellFrame(index, in: strip))
         case .add:
-            let status = failure ?? "pin any session from the Claude app"
+            let status = failure ?? "pin a running Claude session"
             return content("Add a session", status, failure != nil ? failed : Style.muted, beside: layout.cellFrame(shown.count, in: strip))
         case .tab:
             let tab = layout.tabRect(in: panel.frame, edge: edge, collapsed: collapsed)
@@ -219,5 +219,5 @@ func track(_ apply: @escaping @MainActor () -> Void) {
 }
 
 enum Preferences {
-    static let store = UserDefaults(suiteName: "com.elrincondeldev.tomari") ?? .standard
+    static let store = UserDefaults(suiteName: "local.perch-terminal") ?? .standard
 }

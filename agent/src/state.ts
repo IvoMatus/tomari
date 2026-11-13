@@ -39,6 +39,8 @@ export interface SessionRecord {
   stateSince: number;
   /** Time of the last hook event; 0 if only the poll has seen the session. */
   lastEventAt: number;
+  /** "#rrggbb" of the color Claude Code shows for the session (see claude-colors.ts); null when it has none. */
+  color: string | null;
 }
 
 /** How long hook-derived state wins over a contradicting poll. */
@@ -53,7 +55,7 @@ const ASKS_USER: Record<string, string> = {
 const MAX_ACTIVITY = 48;
 
 function newRecord(id: string, cwd: string, now: number, state: SessionState = "idle"): SessionRecord {
-  return { id, name: null, cwd, state, activity: null, live: true, pid: null, stateSince: now, lastEventAt: now };
+  return { id, name: null, cwd, state, activity: null, live: true, pid: null, stateSince: now, lastEventAt: now, color: null };
 }
 
 export function applyHookEvent(prev: SessionRecord | undefined, e: HookEvent, now: number): SessionRecord {

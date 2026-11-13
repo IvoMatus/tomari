@@ -1,0 +1,86 @@
+#!/bin/bash
+# Starts perch-terminal by hand: builds what changed, then runs the agent and the strip in the
+# background, logging to ~/Library/Logs/perch-terminal. Nothing here starts at login.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DATA="$HOME/Library/Application Support/perch-terminal"
+LOGS="$HOME/Library/Logs/perch-terminal"
+AGENT="$ROOT/.build/perch-terminal/perch"
+OVERLAY="$ROOT/.build/release/tomari-overlay"
+PANEL_PORT=7778
+# The agent runs `claude agents`, osascript and ps.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+mkdir -p "$DATA" "$LOGS"
+
+# stale <binary> <source dir…>: true when the binary is missing or older than a source file.
+stale() {
+  local binary="$1"
+  shift
+  [[ ! -x "$binary" ]] || [[ -n "$(find "$@" -type f -newer "$binary" | head -1)" ]]
+}
+
+# running <pid file> <binary>: prints the pid when that binary runs under it.
+running() {
+  local pid
+  pid="$(cat "$1" 2>/dev/null)" || return 1
+  [[ -n "$pid" ]] && [[ "$(ps -p "$pid" -o command= 2>/dev/null)" == "$2"* ]] && echo "$pid"
+}
+
+rebuilt=0
+if stale "$AGENT" "$ROOT/agent/src" "$ROOT/shared"; then
+  echo "building the agent…"
+  mkdir -p "$(dirname "$AGENT")"
+  version="terminal-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
+  # Run from the output folder: bun build --compile leaves temporary files in the current one.
+  (cd "$(dirname "$AGENT")" && bun build "$ROOT/agent/src/tomari.ts" --compile --define "TOMARI_VERSION=\"$version\"" --outfile "$AGENT") \
+    >"$LOGS/build-agent.log" 2>&1 || { tail -20 "$LOGS/build-agent.log"; exit 1; }
+  rebuilt=1
+fi
+if stale "$OVERLAY" "$ROOT/Sources" "$ROOT/Package.swift"; then
+  echo "building the strip…"
+  (cd "$ROOT" && swift build -c release --product tomari-overlay) \
+    >"$LOGS/build-strip.log" 2>&1 || { tail -20 "$LOGS/build-strip.log"; exit 1; }
+  # A change to a resource only (characters.json) updates the bundle, not the binary: mark it built.
+  touch "$OVERLAY"
+  rebuilt=1
+fi
+
+if [[ $rebuilt == 1 ]] && { running "$DATA/agent.pid" "$AGENT" || running "$DATA/overlay.pid" "$OVERLAY"; } >/dev/null; then
+  echo "restarting with the new build…"
+  "$ROOT/bin/perch-down" >/dev/null
+fi
+
+if pid="$(running "$DATA/agent.pid" "$AGENT")"; then
+  echo "agent : already running (pid $pid)"
+else
+  nohup "$AGENT" agent >>"$LOGS/agent.log" 2>&1 </dev/null &
+  echo $! >"$DATA/agent.pid"
+  for _ in $(seq 50); do
+    curl -fsS -m 1 "http://127.0.0.1:$PANEL_PORT/health" >/dev/null 2>&1 && break
+    sleep 0.1
+  done
+  if ! pid="$(running "$DATA/agent.pid" "$AGENT")"; then
+    echo "agent : did not start; last lines of $LOGS/agent.log:"
+    tail -10 "$LOGS/agent.log"
+    exit 1
+  fi
+  echo "agent : started (pid $pid)"
+fi
+
+if pid="$(running "$DATA/overlay.pid" "$OVERLAY")"; then
+  echo "strip : already running (pid $pid)"
+else
+  nohup "$OVERLAY" >>"$LOGS/overlay.log" 2>&1 </dev/null &
+  echo $! >"$DATA/overlay.pid"
+  sleep 0.5
+  if ! pid="$(running "$DATA/overlay.pid" "$OVERLAY")"; then
+    echo "strip : did not start; last lines of $LOGS/overlay.log:"
+    tail -5 "$LOGS/overlay.log"
+    exit 1
+  fi
+  echo "strip : started (pid $pid)"
+fi
+
+echo "logs  : $LOGS"

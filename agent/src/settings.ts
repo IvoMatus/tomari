@@ -1,23 +1,40 @@
-import { copyFile } from "node:fs/promises";
-import { CLAUDE_SETTINGS } from "./config.ts";
+import { copyFile, mkdir } from "node:fs/promises";
+import { BACKUP_DIR, CLAUDE_SETTINGS } from "./config.ts";
 import { hasPanelHooks, mergeHooks, type Settings } from "./hooks-config.ts";
 
-async function readSettings(): Promise<Settings> {
-  const file = Bun.file(CLAUDE_SETTINGS);
+async function readSettings(path = CLAUDE_SETTINGS): Promise<Settings> {
+  const file = Bun.file(path);
   return (await file.exists()) ? await file.json() : {};
 }
 
-/** Adds or removes our hooks in ~/.claude/settings.json, backing the file up first. False when nothing changed. */
-export async function writeHooks({ install }: { install: boolean }): Promise<boolean> {
-  const exists = await Bun.file(CLAUDE_SETTINGS).exists();
-  const before = await readSettings();
-  const after = mergeHooks(before, { install });
-  if (JSON.stringify(after) === JSON.stringify(before)) return false;
-  if (exists) await copyFile(CLAUDE_SETTINGS, `${CLAUDE_SETTINGS}.bak-tomari-${Date.now()}`);
-  await Bun.write(CLAUDE_SETTINGS, JSON.stringify(after, null, 2) + "\n");
-  return true;
+/** The settings file as it would be with our hooks added (`install`) or removed. */
+export async function previewHooks({ install }: { install: boolean }, path = CLAUDE_SETTINGS): Promise<string> {
+  return JSON.stringify(mergeHooks(await readSettings(path), { install }), null, 2) + "\n";
 }
 
-export async function hooksInstalled() {
-  return hasPanelHooks(await readSettings());
+/**
+ * Adds or removes our hooks in the workspace's .claude/settings.json, copying the file into
+ * BACKUP_DIR first. Writes nothing when the hooks are already as asked.
+ */
+export async function writeHooks(
+  { install }: { install: boolean },
+  path = CLAUDE_SETTINGS,
+  backupDir = BACKUP_DIR,
+): Promise<{ changed: boolean; backup: string | null }> {
+  const exists = await Bun.file(path).exists();
+  const before = await readSettings(path);
+  const after = mergeHooks(before, { install });
+  if (JSON.stringify(after) === JSON.stringify(before)) return { changed: false, backup: null };
+  let backup: string | null = null;
+  if (exists) {
+    await mkdir(backupDir, { recursive: true });
+    backup = `${backupDir}/settings.json.${Date.now()}`;
+    await copyFile(path, backup);
+  }
+  await Bun.write(path, JSON.stringify(after, null, 2) + "\n");
+  return { changed: true, backup };
+}
+
+export async function hooksInstalled(path = CLAUDE_SETTINGS) {
+  return hasPanelHooks(await readSettings(path));
 }

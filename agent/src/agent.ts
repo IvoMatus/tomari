@@ -1,6 +1,7 @@
 import { PANEL_PORT } from "../../shared/protocol.ts";
-import { HOOK_PORT, loadConfig, panelUrls } from "./config.ts";
-import { watchDesktopFocus } from "./desktop-focus.ts";
+import { startColorWatcher } from "./claude-colors.ts";
+import { HOOK_PORT, loadConfig, panelUrls, WORKSPACE } from "./config.ts";
+import { followGhosttyFocus } from "./ghostty-focus.ts";
 import { SessionHub } from "./hub.ts";
 import { startPoller } from "./poller.ts";
 import { startServers } from "./server.ts";
@@ -19,7 +20,8 @@ export async function runAgent({ lan }: { lan: boolean }) {
     panelHost: lan ? "0.0.0.0" : "127.0.0.1",
   });
   const stopPoller = startPoller(hub);
-  const stopFocus = watchDesktopFocus((id) => hub.setFocused(id));
+  const stopFocus = followGhosttyFocus(hub);
+  const stopColors = startColorWatcher(hub);
   const pruneTimer = setInterval(() => hub.prune(), 10 * 60 * 1000);
 
   hub.subscribe((change) => {
@@ -32,16 +34,18 @@ export async function runAgent({ lan }: { lan: boolean }) {
   });
 
   const urls = lan ? await panelUrls() : [`ws://127.0.0.1:${PANEL_PORT}/ws`];
-  console.log(`tomari agent
-  hooks : http://127.0.0.1:${HOOK_PORT}/hook
-  panel : ${urls.join("  ")}
-  data  : ${config.dbPath}
+  console.log(`perch-terminal agent
+  hooks     : http://127.0.0.1:${HOOK_PORT}/hook
+  panel     : ${urls.join("  ")}
+  data      : ${config.dbPath}
+  workspace : ${WORKSPACE}
 `);
 
   function shutdown() {
     clearInterval(pruneTimer);
     stopPoller();
     stopFocus();
+    stopColors();
     servers.stop();
     store.close();
     process.exit(0);

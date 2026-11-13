@@ -1,6 +1,7 @@
 import { runAgent } from "./agent.ts";
 import { parseCommand, USAGE } from "./cli.ts";
-import { setup, uninstall } from "./install.ts";
+import { CLAUDE_SETTINGS } from "./config.ts";
+import { previewHooks, writeHooks } from "./settings.ts";
 import { status } from "./status.ts";
 
 declare const TOMARI_VERSION: string | undefined;
@@ -12,14 +13,18 @@ try {
     case "agent":
       await runAgent({ lan: command.lan });
       break;
-    case "setup":
-      await setup({ pi: command.pi });
+    case "hooks": {
+      if (!command.install && !command.remove) {
+        process.stdout.write(await previewHooks({ install: true }));
+        break;
+      }
+      const { changed, backup } = await writeHooks({ install: command.install });
+      const done = command.install ? "added to" : "removed from";
+      console.log(changed ? `hooks ${done} ${CLAUDE_SETTINGS}${backup ? `\nbackup: ${backup}` : ""}` : `nothing to change in ${CLAUDE_SETTINGS}`);
       break;
+    }
     case "status":
       await status(VERSION);
-      break;
-    case "uninstall":
-      await uninstall({ purge: command.purge });
       break;
     case "version":
       console.log(VERSION);

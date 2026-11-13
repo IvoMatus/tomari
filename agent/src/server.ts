@@ -4,13 +4,12 @@
  * network-facing port can never inject hook events.
  */
 import { timingSafeEqual } from "node:crypto";
-import { basename } from "node:path";
 import type { LibraryEntry, ServerMessage } from "../../shared/protocol.ts";
-import { listDesktopSessions, type DesktopSession } from "./desktop-sessions.ts";
 import type { SessionHub } from "./hub.ts";
 import { openSession, type OpenResult } from "./open-session.ts";
 import { parseClientMessage } from "./protocol-guard.ts";
-import type { HookEvent } from "./state.ts";
+import type { AgentEntry, HookEvent } from "./state.ts";
+import { workspaceAgents } from "./workspace-sessions.ts";
 
 export interface ServerOptions {
   hub: SessionHub;
@@ -18,9 +17,9 @@ export interface ServerOptions {
   hookPort: number;
   panelPort: number;
   panelHost?: string;
-  /** Replaceable so tests don't open real sessions or read the real desktop app. */
-  open?: (id: string) => Promise<OpenResult>;
-  desktopSessions?: () => Promise<DesktopSession[]>;
+  /** Replaceable so tests don't touch Ghostty or run `claude agents`. */
+  open?: (pid: number | null) => Promise<OpenResult>;
+  liveSessions?: () => Promise<AgentEntry[]>;
 }
 
 const TOPIC = "panel";
@@ -32,26 +31,20 @@ export function startServers({
   hookPort,
   panelPort,
   panelHost = "127.0.0.1",
-  open = openSession,
-  desktopSessions = () => listDesktopSessions(),
+  open = (pid) => openSession(pid),
+  liveSessions = () => workspaceAgents(),
 }: ServerOptions) {
+  /** The workspace's running sessions, fresh from `claude agents`; the hub takes them in first, so each one can be pinned. */
   async function library(): Promise<LibraryEntry[]> {
-    return (await desktopSessions())
-      .filter((s) => !s.archived)
-      .slice(0, LIBRARY_SIZE)
-      .map((s) => ({
-        id: s.sessionId,
-        name: s.title ?? hub.get(s.sessionId)?.name ?? basename(s.cwd),
-        cwd: s.cwd,
-        lastActivityAt: s.lastActivityAt,
-        pinned: hub.get(s.sessionId)?.pinned ?? false,
-      }));
-  }
-
-  /** Lets the panel pin a desktop session whose process isn't running, so the agent never saw it. */
-  async function adoptFromDesktop(id: string) {
-    const session = (await desktopSessions()).find((s) => s.sessionId === id);
-    if (session) hub.adopt(session.sessionId, session.title, session.cwd, session.lastActivityAt);
+    const agents = await liveSessions();
+    hub.handleAgents(agents);
+    return agents
+      .flatMap((agent) => {
+        const s = hub.get(agent.sessionId);
+        return s ? [{ id: s.id, name: s.name, cwd: s.cwd, lastActivityAt: s.stateSince, pinned: s.pinned }] : [];
+      })
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+      .slice(0, LIBRARY_SIZE);
   }
 
   const hookServer = Bun.serve({
@@ -90,16 +83,22 @@ export function startServers({
       async message(ws, raw) {
         const msg = parseClientMessage(String(raw));
         if (!msg) return send(ws, { type: "error", message: "invalid message" });
-        if (msg.type === "library") return send(ws, { type: "library", sessions: await library() });
-        if (!hub.has(msg.id) && msg.type !== "open") await adoptFromDesktop(msg.id);
+        if (msg.type === "library") {
+          const sessions = await library().catch((err) => {
+            send(ws, { type: "error", message: `claude agents failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200) });
+            return null;
+          });
+          return sessions && send(ws, { type: "library", sessions });
+        }
         if (!hub.has(msg.id)) return send(ws, { type: "error", message: "unknown session" });
 
         switch (msg.type) {
           case "open": {
-            const result = await open(msg.id);
-            // The desktop log confirms focus a moment later; show it right away.
-            if (result.ok) hub.setFocused(msg.id);
-            else send(ws, { type: "error", message: result.error });
+            const result = await open(hub.pidOf(msg.id));
+            // The Ghostty watcher confirms focus within a second; show it right away.
+            if (!result.ok) send(ws, { type: "error", message: result.error });
+            else if (result.focused) hub.setFocused(msg.id);
+            else send(ws, { type: "error", message: hub.get(msg.id)?.live ? "no Ghostty panel found; showed Ghostty" : "not running; showed Ghostty" });
             break;
           }
           case "pin":

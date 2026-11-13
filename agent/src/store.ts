@@ -1,16 +1,19 @@
 /**
  * SQLite persistence. Observed session state and the user's pins live in separate
  * tables: the first can be rebuilt from Claude at any time, the second cannot.
+ * Pins are keyed by session name (see pinKey in hub.ts), so they outlive session ids.
  */
 import { Database } from "bun:sqlite";
-import { existsSync } from "node:fs";
-import { DEFAULT_ICON, type SessionIcon, type SessionState } from "../../shared/protocol.ts";
+import { DEFAULT_ICON, type SessionState } from "../../shared/protocol.ts";
 import type { SessionRecord } from "./state.ts";
 
 export interface Pin {
-  sessionId: string;
+  /** The session's name, or its id while it has none. */
+  key: string;
   position: number;
-  icon: SessionIcon;
+  character: string;
+  /** "#rrggbb" picked in the strip; null follows Claude's color for the session. */
+  color: string | null;
 }
 
 interface SessionRow {
@@ -23,13 +26,14 @@ interface SessionRow {
   pid: number | null;
   state_since: number;
   last_event_at: number;
+  color: string | null;
 }
 
 interface PinRow {
-  session_id: string;
+  pin_key: string;
   position: number;
   character: string;
-  color: string;
+  color: string | null;
 }
 
 export class Store {
@@ -49,16 +53,44 @@ export class Store {
         live          INTEGER NOT NULL,
         pid           INTEGER,
         state_since   INTEGER NOT NULL,
-        last_event_at INTEGER NOT NULL
+        last_event_at INTEGER NOT NULL,
+        color         TEXT
       );
       CREATE TABLE IF NOT EXISTS pins (
-        session_id TEXT PRIMARY KEY,
+        pin_key    TEXT PRIMARY KEY,
         position   INTEGER NOT NULL,
         character  TEXT NOT NULL,
-        color      TEXT NOT NULL,
+        color      TEXT,
         created_at INTEGER NOT NULL
       );
     `);
+    this.migrate();
+  }
+
+  /**
+   * Databases from before Claude's colors: sessions gain a color, and pin colors become optional.
+   * The colors picked until then reset to Claude's; characters stay.
+   */
+  private migrate() {
+    const columns = (table: string) => this.db.query<{ name: string; notnull: number }, []>(`PRAGMA table_info(${table})`).all();
+    this.db.transaction(() => {
+      if (!columns("sessions").some((c) => c.name === "color")) this.db.exec("ALTER TABLE sessions ADD COLUMN color TEXT");
+      if (columns("pins").find((c) => c.name === "color")?.notnull) {
+        this.db.exec(`
+          CREATE TABLE pins_new (
+            pin_key    TEXT PRIMARY KEY,
+            position   INTEGER NOT NULL,
+            character  TEXT NOT NULL,
+            color      TEXT,
+            created_at INTEGER NOT NULL
+          );
+          INSERT INTO pins_new (pin_key, position, character, color, created_at)
+            SELECT pin_key, position, character, NULL, created_at FROM pins;
+          DROP TABLE pins;
+          ALTER TABLE pins_new RENAME TO pins;
+        `);
+      }
+    })();
   }
 
   loadSessions(): SessionRecord[] {
@@ -75,20 +107,21 @@ export class Store {
         pid: r.pid,
         stateSince: r.state_since,
         lastEventAt: r.last_event_at,
+        color: r.color,
       }));
   }
 
   saveSession(s: SessionRecord) {
     this.db
       .query(
-        `INSERT INTO sessions (id, name, cwd, state, activity, live, pid, state_since, last_event_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sessions (id, name, cwd, state, activity, live, pid, state_since, last_event_at, color)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name, cwd = excluded.cwd, state = excluded.state, activity = excluded.activity,
            live = excluded.live, pid = excluded.pid, state_since = excluded.state_since,
-           last_event_at = excluded.last_event_at`,
+           last_event_at = excluded.last_event_at, color = excluded.color`,
       )
-      .run(s.id, s.name, s.cwd, s.state, s.activity, s.live ? 1 : 0, s.pid, s.stateSince, s.lastEventAt);
+      .run(s.id, s.name, s.cwd, s.state, s.activity, s.live ? 1 : 0, s.pid, s.stateSince, s.lastEventAt, s.color);
   }
 
   deleteSession(id: string) {
@@ -97,59 +130,40 @@ export class Store {
 
   loadPins(): Map<string, Pin> {
     const rows = this.db.query<PinRow, []>("SELECT * FROM pins ORDER BY position").all();
-    return new Map(
-      rows.map((r) => [r.session_id, { sessionId: r.session_id, position: r.position, icon: { character: r.character, color: r.color } }]),
-    );
+    return new Map(rows.map((r) => [r.pin_key, { key: r.pin_key, position: r.position, character: r.character, color: r.color }]));
   }
 
-  /** Appends to the pin order with the default icon; no-op if already pinned. */
-  pin(sessionId: string) {
+  /** Appends to the pin order with the default character, following Claude's color; no-op if already pinned. */
+  pin(key: string) {
     this.db
       .query(
-        `INSERT OR IGNORE INTO pins (session_id, position, character, color, created_at)
-         VALUES (?, (SELECT COALESCE(MAX(position) + 1, 0) FROM pins), ?, ?, ?)`,
+        `INSERT OR IGNORE INTO pins (pin_key, position, character, color, created_at)
+         VALUES (?, (SELECT COALESCE(MAX(position) + 1, 0) FROM pins), ?, NULL, ?)`,
       )
-      .run(sessionId, DEFAULT_ICON.character, DEFAULT_ICON.color, Date.now());
+      .run(key, DEFAULT_ICON.character, Date.now());
   }
 
-  unpin(sessionId: string) {
-    this.db.query("DELETE FROM pins WHERE session_id = ?").run(sessionId);
+  unpin(key: string) {
+    this.db.query("DELETE FROM pins WHERE pin_key = ?").run(key);
   }
 
-  /** Pins the session if it isn't yet, then sets its icon. */
-  setIcon(sessionId: string, icon: SessionIcon) {
+  /** Pins the key if it isn't yet, then sets its character and color (null: Claude's). */
+  setIcon(key: string, character: string, color: string | null) {
     this.db
       .query(
-        `INSERT INTO pins (session_id, position, character, color, created_at)
+        `INSERT INTO pins (pin_key, position, character, color, created_at)
          VALUES (?, (SELECT COALESCE(MAX(position) + 1, 0) FROM pins), ?, ?, ?)
-         ON CONFLICT(session_id) DO UPDATE SET character = excluded.character, color = excluded.color`,
+         ON CONFLICT(pin_key) DO UPDATE SET character = excluded.character, color = excluded.color`,
       )
-      .run(sessionId, icon.character, icon.color, Date.now());
+      .run(key, character, color, Date.now());
   }
 
-  /**
-   * Copies pins, with the sessions they point at, from another agent's database (claude-panel's).
-   * Does nothing once this store has pins of its own. Returns how many pins it copied.
-   */
-  importPinsFrom(path: string): number {
-    if (!existsSync(path) || this.db.query("SELECT 1 FROM pins LIMIT 1").get()) return 0;
-    this.db.query("ATTACH DATABASE ? AS source").run(path);
-    try {
-      return this.db.transaction(() => {
-        this.db.exec(`
-          INSERT OR IGNORE INTO sessions (id, name, cwd, state, activity, live, pid, state_since, last_event_at)
-          SELECT id, name, cwd, state, activity, live, pid, state_since, last_event_at FROM source.sessions
-          WHERE id IN (SELECT session_id FROM source.pins)`);
-        return this.db
-          .query(
-            `INSERT OR IGNORE INTO pins (session_id, position, character, color, created_at)
-             SELECT session_id, position, character, color, created_at FROM source.pins`,
-          )
-          .run().changes;
-      })();
-    } finally {
-      this.db.exec("DETACH DATABASE source");
-    }
+  /** Hands the pin of `from` to `to`, unless `to` has one already; `from` loses it either way. */
+  movePin(from: string, to: string) {
+    this.db.transaction(() => {
+      this.db.query("UPDATE OR IGNORE pins SET pin_key = ? WHERE pin_key = ?").run(to, from);
+      this.db.query("DELETE FROM pins WHERE pin_key = ?").run(from);
+    })();
   }
 
   close() {

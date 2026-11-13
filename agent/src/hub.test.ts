@@ -70,14 +70,122 @@ describe("SessionHub", () => {
     expect(hub.get(A)).toMatchObject({ pinned: true, position: 0, icon: { character: "ghost" } });
   });
 
-  test("adopting a session that isn't running tracks it as closed, and the poll revives it", () => {
-    const { hub } = setup();
-    hub.adopt(A, "Idle work", "/Users/dev/idle", 5000);
-    hub.adopt(A, "ignored", "/ignored", 0);
-    expect(hub.get(A)).toMatchObject({ name: "Idle work", live: false, state: "ended", stateSince: 5000 });
+  describe("pins follow the session's name", () => {
+    const composer = (sessionId: string, pid: number) => ({ sessionId, name: "composer", cwd: "/Users/dev/cenco", pid, status: "idle" as const, startedAt: 0 });
 
-    hub.handleAgents([{ sessionId: A, name: "Idle work", cwd: "/Users/dev/idle", status: "idle", startedAt: 0 }]);
-    expect(hub.get(A)).toMatchObject({ live: true, state: "idle" });
+    test("reopening a named session under a new id keeps its pin, character and color, and drops the old record", () => {
+      const { hub, changes, tick } = setup();
+      hub.handleAgents([composer(A, 100)]);
+      hub.setIcon(A, { character: "crab", color: "#ff6a1a" });
+
+      // The terminal closes, then `claude -n composer` starts again with a new session id.
+      tick(20_000);
+      hub.handleAgents([composer(B, 200)]);
+
+      expect(hub.has(A)).toBe(false);
+      expect(changes).toContainEqual({ type: "removed", id: A });
+      expect(hub.get(B)).toMatchObject({ name: "composer", live: true, pinned: true, position: 0, icon: { character: "crab", color: "#ff6a1a" } });
+      expect(hub.snapshot().filter((s) => s.pinned)).toHaveLength(1);
+    });
+
+    test("unpinning one session of a name unpins the name", () => {
+      const { hub, tick } = setup();
+      hub.handleAgents([composer(A, 100)]);
+      hub.setPinned(A, true);
+      tick(20_000);
+      hub.handleAgents([composer(B, 200)]);
+      hub.setPinned(B, false);
+      tick(20_000);
+      hub.handleAgents([composer(A, 300)]);
+      expect(hub.get(A)!.pinned).toBe(false);
+    });
+
+    test("a session pinned before the poll named it keeps the pin under its name", () => {
+      const { hub, tick } = setup();
+      hub.handleHook(ev(A, "Stop"));
+      hub.setIcon(A, { character: "ghost", color: "#00ff00" });
+      hub.handleAgents([composer(A, 100)]);
+
+      tick(20_000);
+      hub.handleAgents([composer(B, 200)]);
+      expect(hub.get(B)).toMatchObject({ pinned: true, icon: { character: "ghost" } });
+    });
+
+    test("sessions without a name are pinned by id", () => {
+      const { hub } = setup();
+      hub.handleHook(ev(A, "Stop"));
+      hub.handleHook(ev(B, "Stop"));
+      hub.setPinned(A, true);
+      expect(hub.get(A)!.pinned).toBe(true);
+      expect(hub.get(B)!.pinned).toBe(false);
+    });
+  });
+
+  describe("creatures wear Claude's color unless the user picks another", () => {
+    const RED = "#ff4d4d";
+    const CYAN = "#3ccfe6";
+    const composer = { sessionId: A, name: "composer", cwd: "/Users/dev/cenco", pid: 100, status: "idle" as const, startedAt: 0 };
+
+    test("Claude's color shows on pinned and unpinned sessions, and is announced", () => {
+      const { hub, changes } = setup();
+      hub.handleAgents([composer]);
+      hub.setClaudeColor(A, RED);
+      expect(hub.get(A)!.icon).toEqual({ character: "default", color: RED });
+      expect(changes.at(-1)).toMatchObject({ type: "session", session: { icon: { color: RED } } });
+
+      hub.setPinned(A, true);
+      expect(hub.get(A)!.icon.color).toBe(RED);
+      hub.setClaudeColor(A, CYAN); // e.g. /color cyan
+      expect(hub.get(A)!.icon.color).toBe(CYAN);
+    });
+
+    test("a picked color wins; picking Claude's again, or unpinning, follows Claude's", () => {
+      const { hub } = setup();
+      hub.handleAgents([composer]);
+      hub.setClaudeColor(A, RED);
+
+      hub.setIcon(A, { character: "robot", color: CYAN });
+      hub.setClaudeColor(A, "#4cd964");
+      expect(hub.get(A)!.icon).toEqual({ character: "robot", color: CYAN });
+
+      hub.setIcon(A, { character: "robot", color: "#4cd964" });
+      hub.setClaudeColor(A, RED);
+      expect(hub.get(A)!.icon).toEqual({ character: "robot", color: RED });
+
+      hub.setIcon(A, { character: "owl", color: CYAN });
+      hub.setPinned(A, false);
+      expect(hub.get(A)!.icon).toEqual({ character: "default", color: RED });
+    });
+
+    test("picking only a character keeps following Claude's color", () => {
+      const { hub } = setup();
+      hub.handleAgents([composer]);
+      hub.setClaudeColor(A, RED);
+      hub.setIcon(A, { character: "crab", color: RED }); // the strip resends the color it shows
+      hub.setClaudeColor(A, CYAN);
+      expect(hub.get(A)!.icon).toEqual({ character: "crab", color: CYAN });
+    });
+
+    test("a session without Claude's color shows the default one", () => {
+      const { hub } = setup();
+      hub.handleAgents([composer]);
+      expect(hub.get(A)!.icon.color).toBe("#d97757");
+    });
+  });
+
+  test("the Claude process of running sessions only", () => {
+    const { hub } = setup();
+    hub.handleAgents([
+      { sessionId: A, name: "composer", cwd: "/x", pid: 100, status: "idle", startedAt: 0 },
+      { sessionId: B, name: "api-dev", cwd: "/x", status: "idle", startedAt: 0 },
+    ]);
+    expect(hub.processes()).toEqual([{ id: A, pid: 100 }]);
+    expect(hub.pidOf(A)).toBe(100);
+    expect(hub.pidOf(B)).toBeNull();
+
+    hub.handleHook(ev(A, "SessionEnd"));
+    expect(hub.pidOf(A)).toBeNull();
+    expect(hub.processes()).toEqual([]);
   });
 
   test("focus is announced once per change", () => {

@@ -1,38 +1,40 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import type { ServerMessage } from "../../shared/protocol.ts";
-import type { DesktopSession } from "./desktop-sessions.ts";
 import { SessionHub } from "./hub.ts";
-import { planOpen } from "./open-session.ts";
 import { startServers } from "./server.ts";
+import type { AgentEntry } from "./state.ts";
 import { Store } from "./store.ts";
 
 const ID = "0603472f-b7c5-4dae-b7a1-142468264b30";
 const TOKEN = "test-token";
 
-const IDLE = "22222222-2222-4222-8222-222222222222";
-const DESKTOP: DesktopSession[] = [
-  { localId: "local_idle", sessionId: IDLE, title: "Idle work", cwd: "/Users/dev/idle", lastActivityAt: 5000, archived: false },
-  { localId: "local_old", sessionId: "33333333-3333-4333-8333-333333333333", title: "Old", cwd: "/x", lastActivityAt: 1, archived: true },
-];
+const COMPOSER = "22222222-2222-4222-8222-222222222222";
+const API_DEV = "33333333-3333-4333-8333-333333333333";
+let live: AgentEntry[];
 
 let servers: ReturnType<typeof startServers>;
-let opened: string[];
+let opened: (number | null)[];
+/** Whether the fake Ghostty finds a panel for the session. */
+let panelFound: boolean;
 
 beforeEach(() => {
   opened = [];
+  panelFound = true;
+  live = [
+    { sessionId: COMPOSER, name: "composer", cwd: "/Users/dev/cenco", pid: 4242, status: "idle", startedAt: 0 },
+    { sessionId: API_DEV, name: "api-dev", cwd: "/Users/dev/cenco", pid: 4343, status: "busy", startedAt: 0 },
+  ];
   servers = startServers({
     hub: new SessionHub(new Store()),
     token: TOKEN,
     hookPort: 0, // 0 = any free port
     panelPort: 0,
     panelHost: "127.0.0.1",
-    open: async (id) => {
-      opened.push(id);
-      return { ok: true, command: ["fake-open", id] };
+    open: async (pid) => {
+      opened.push(pid);
+      return { ok: true, focused: panelFound };
     },
-    desktopSessions: async () => DESKTOP,
+    liveSessions: async () => live,
   });
 });
 afterEach(() => servers.stop());
@@ -106,10 +108,14 @@ test("pin, icon and open commands; anything else is refused", async () => {
   ws.send(JSON.stringify({ type: "icon", id: ID, icon: { character: "crab", color: "#ff6a1a" } }));
   expect(await next()).toMatchObject({ type: "session", session: { pinned: true, icon: { character: "crab" } } });
 
+  // Closed: no Claude process, so Ghostty is only activated, and the strip is told why.
+  await postHook({ hook_event_name: "SessionEnd", session_id: ID, cwd: "/tmp/demo" });
+  expect(await next()).toMatchObject({ type: "session", session: { id: ID, state: "ended", live: false } });
+  panelFound = false;
   ws.send(JSON.stringify({ type: "open", id: ID }));
   await waitFor(() => opened.length === 1);
-  expect(opened).toEqual([ID]);
-  expect(await next()).toEqual({ type: "focus", id: ID });
+  expect(opened).toEqual([null]);
+  expect(await next()).toEqual({ type: "error", message: "not running; showed Ghostty" });
 
   ws.send(JSON.stringify({ type: "open", id: "11111111-1111-1111-1111-111111111111" }));
   expect(await next()).toEqual({ type: "error", message: "unknown session" });
@@ -119,46 +125,59 @@ test("pin, icon and open commands; anything else is refused", async () => {
   ws.close();
 });
 
-test("the library lists desktop sessions, and pinning one that isn't running adopts it", async () => {
+test("opening a running session focuses its panel by its Claude process", async () => {
+  const { ws, next } = await connect();
+  await next(); // snapshot
+  ws.send(JSON.stringify({ type: "library" }));
+  while ((await next()).type !== "library");
+
+  ws.send(JSON.stringify({ type: "open", id: COMPOSER }));
+  expect(await next()).toEqual({ type: "focus", id: COMPOSER });
+  expect(opened).toEqual([4242]);
+
+  panelFound = false;
+  ws.send(JSON.stringify({ type: "open", id: API_DEV }));
+  expect(await next()).toEqual({ type: "error", message: "no Ghostty panel found; showed Ghostty" });
+  expect(opened).toEqual([4242, 4343]);
+  ws.close();
+});
+
+test("the library lists the running sessions it is given, and any of them can be pinned", async () => {
   const { ws, next } = await connect();
   await next(); // snapshot
 
   ws.send(JSON.stringify({ type: "library" }));
-  expect(await next()).toEqual({
-    type: "library",
-    sessions: [{ id: IDLE, name: "Idle work", cwd: "/Users/dev/idle", lastActivityAt: 5000, pinned: false }],
-  });
+  let reply: ServerMessage;
+  while ((reply = await next()).type !== "library"); // the new sessions are announced first
+  expect(reply).toMatchObject({ type: "library" });
+  const entries = reply.type === "library" ? reply.sessions : [];
+  expect(entries.map((e) => [e.name, e.pinned])).toEqual([
+    ["composer", false],
+    ["api-dev", false],
+  ]);
 
-  ws.send(JSON.stringify({ type: "pin", id: IDLE, pinned: true }));
-  expect(await next()).toMatchObject({ type: "session", session: { id: IDLE, name: "Idle work", live: false, state: "ended" } });
-  expect(await next()).toMatchObject({ type: "session", session: { id: IDLE, pinned: true } });
+  ws.send(JSON.stringify({ type: "pin", id: API_DEV, pinned: true }));
+  expect(await next()).toMatchObject({ type: "session", session: { id: API_DEV, name: "api-dev", live: true, pinned: true } });
 
   ws.send(JSON.stringify({ type: "library" }));
-  expect(await next()).toMatchObject({ type: "library", sessions: [{ id: IDLE, pinned: true }] });
+  expect(await next()).toMatchObject({ type: "library", sessions: [{ name: "composer", pinned: false }, { name: "api-dev", pinned: true }] });
   ws.close();
 });
 
-test("planOpen: deep link for desktop sessions (running or not), refuse terminal ones, --resume otherwise", async () => {
-  const root = mkdtempSync(`${tmpdir()}/claude-open-`);
-  const liveDir = `${root}/live`;
-  const desktopDir = `${root}/desktop`;
-  mkdirSync(liveDir);
-  mkdirSync(`${desktopDir}/account/org`, { recursive: true });
-  const dirs = { liveDir, desktopDir };
-  try {
-    expect(await planOpen("not-a-uuid", dirs)).toEqual({ ok: false, error: "invalid session id" });
-
-    const unknown = await planOpen(ID, dirs);
-    expect(unknown.ok && unknown.command.slice(1)).toEqual(["--desktop", "--resume", ID]);
-
-    // process.pid makes the fake session count as running.
-    writeFileSync(`${liveDir}/1.json`, JSON.stringify({ pid: process.pid, sessionId: ID, entrypoint: "cli" }));
-    expect((await planOpen(ID, dirs)).ok).toBe(false);
-
-    // Known to the desktop app: its link wins, whether or not a process runs.
-    writeFileSync(`${desktopDir}/account/org/local_abc-123.json`, JSON.stringify({ sessionId: "local_abc-123", cliSessionId: ID }));
-    expect(await planOpen(ID, dirs)).toEqual({ ok: true, command: ["open", "claude://code/continue?session=local_abc-123"] });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("a failing `claude agents` is reported to the strip", async () => {
+  servers.stop();
+  servers = startServers({
+    hub: new SessionHub(new Store()),
+    token: TOKEN,
+    hookPort: 0,
+    panelPort: 0,
+    liveSessions: async () => {
+      throw new Error("claude: command not found");
+    },
+  });
+  const { ws, next } = await connect();
+  await next(); // snapshot
+  ws.send(JSON.stringify({ type: "library" }));
+  expect(await next()).toEqual({ type: "error", message: "claude agents failed: claude: command not found" });
+  ws.close();
 });

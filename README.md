@@ -10,6 +10,28 @@ A floating strip on the edge of your Mac's screen with one animated pixel-art cr
 
 > **Early development.** Expect rough edges. macOS 14 or newer only.
 
+## Fork para Ghostty (perch-terminal)
+
+Este repositorio es un fork local de [Tomari](https://github.com/elrincondeldev/tomari) (antes Perch) (licencia MIT) para sesiones de Claude Code abiertas en terminales de Ghostty, no en la app de escritorio de Claude. Qué cambia respecto del original:
+
+- **Clic en una criatura**: enfoca el panel de Ghostty donde corre la sesión, buscando el tty del proceso de Claude (o el de un proceso padre, como la terminal de nvim). Si no lo encuentra, solo activa Ghostty. Nunca abre la app de escritorio ni hace `claude --resume`.
+- **Sesión al frente**: la terminal enfocada de la pestaña seleccionada de la ventana del frente de Ghostty, consultada por AppleScript con un `osascript` persistente que termina junto con el agente.
+- **Lista del +**: las sesiones vivas de `claude agents --json` cuyo cwd está bajo `~/cenco`. El agente ignora las sesiones de otras carpetas.
+- **Pins, personaje y color**: se guardan por nombre de sesión (`claude -n composer`), así que se conservan cuando la sesión se vuelve a abrir con otro sessionId.
+- **Color de Claude**: cada criatura usa el color de su sesión, que es su `/color` o, si no tiene, el `color:` del agente con que se abrió (`claude --agent`). Un color elegido en el menú gana; quitar el pin vuelve al de Claude. Se lee de archivos internos de Claude Code (`~/.claude/sessions/<pid>.json` y el transcript de la sesión); si cambian, las criaturas quedan con el color predeterminado. El rojo de Claude no está en el menú de colores.
+- **Personajes nuevos**: Owl, Frog, Crab y Pou, además de los cuatro originales. Las plantillas aceptan `W` (blanco fijo), que usa Pou en los ojos.
+- **Sin LaunchAgents**: no hay `setup` ni `uninstall`. Se arranca con `bin/perch-up` y se detiene con `bin/perch-down`.
+- **Datos aparte del original**: `~/Library/Application Support/perch-terminal`, logs en `~/Library/Logs/perch-terminal` y defaults en `local.perch-terminal`. Los puertos siguen siendo 7777 y 7778, así que no puede correr a la vez que el Tomari original.
+- **Hooks en el proyecto**: van en `~/cenco/.claude/settings.json`, no en `~/.claude/settings.json`. `tomari hooks` muestra cómo quedaría ese archivo; `tomari hooks --install` y `--remove` lo modifican, con respaldo previo en `…/perch-terminal/backups`.
+
+```bash
+bin/perch-up                         # compila lo que cambió y levanta el agente y la franja en segundo plano
+bin/perch-down                       # los detiene
+.build/perch-terminal/perch status   # ¿responde el agente? ¿están los hooks?
+```
+
+Necesita Ghostty 1.4 o más nuevo (por su AppleScript), Bun y las Command Line Tools de Xcode. El resto de este README describe el Tomari original; `npx @elrincondeldev/tomari`, `npm/`, `scripts/release.ts` y el workflow de release no se usan en este fork.
+
 ## Install
 
 ```bash
@@ -71,7 +93,7 @@ The characters are 16×16 text templates in [`Sources/TomariCore/Resources/chara
 
 | Field | Meaning |
 |---|---|
-| `body` | 16 rows of 16 cells: `B` body (the session's color), `D` darker, `L` lighter, `F` face plate, `P` pink, `.` empty |
+| `body` | 16 rows of 16 cells: `B` body (the session's color), `D` darker, `L` lighter, `F` face plate, `P` pink, `W` white, `.` empty |
 | `walk` | Optional rows that replace the body from `row` down on alternate frames while the session works |
 | `eyes` | Top-left corners of the two 2×2 eyes, which blink, close and squint on their own |
 | `eyeColor` | Optional `#rrggbb` |

@@ -1,25 +1,25 @@
 export type Command =
   | { name: "agent"; lan: boolean }
-  | { name: "setup"; pi: boolean }
+  | { name: "hooks"; install: boolean; remove: boolean }
   | { name: "status" }
-  | { name: "uninstall"; purge: boolean }
   | { name: "version" }
   | { name: "help"; error?: string };
 
 export const USAGE = `Usage: tomari <command>
 
-  setup [--pi]         install the agent, the strip and the Claude Code hooks, and start them
-                       --pi also lets a claude-panel Raspberry Pi connect over the LAN
-  status               show what is installed and running
-  uninstall [--purge]  remove everything; --purge also deletes pins and icons without asking
-  agent [--lan]        run the agent in the foreground (what the LaunchAgent runs)
-  version              print the version`;
+  agent [--lan]                run the agent in the foreground (bin/perch-up runs it in the background)
+                               --lan also lets a claude-panel Raspberry Pi connect over the LAN
+  hooks                        print the workspace's settings.json with the hooks added, without writing it
+  hooks --install | --remove   add or remove the hooks in that file, after backing it up
+  status                       show whether the agent answers and the hooks are installed
+  version                      print the version
+
+Nothing here starts at login: bin/perch-up and bin/perch-down start and stop everything.`;
 
 const FLAGS: Record<string, Record<string, string>> = {
   agent: { "--lan": "lan" },
-  setup: { "--pi": "pi" },
+  hooks: { "--install": "install", "--remove": "remove" },
   status: {},
-  uninstall: { "--purge": "purge" },
 };
 
 export function parseCommand(args: string[]): Command {
@@ -36,5 +36,6 @@ export function parseCommand(args: string[]): Command {
     if (!key) return { name: "help", error: `unknown option for ${name}: ${arg}` };
     command[key] = true;
   }
+  if (command.install && command.remove) return { name: "help", error: "hooks takes --install or --remove, not both" };
   return command as Command;
 }
