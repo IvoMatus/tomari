@@ -4,6 +4,7 @@
  * Pins are keyed by session name (see pinKey in hub.ts), so they outlive session ids.
  */
 import { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
 import { DEFAULT_ICON, type SessionState } from "../../shared/protocol.ts";
 import type { SessionRecord } from "./state.ts";
 
@@ -43,6 +44,7 @@ export class Store {
   constructor(path = ":memory:") {
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
+    this.migratePinsById();
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id            TEXT PRIMARY KEY,
@@ -65,6 +67,32 @@ export class Store {
       );
     `);
     this.migrate();
+  }
+
+  /**
+   * Databases from before pins went by name (Tomari up to 0.3, claude-panel): each pin moves from
+   * its session's id to that session's name, keeping its color. Two pins that land on one name
+   * leave the first.
+   */
+  private migratePinsById() {
+    const columns = this.db.query<{ name: string }, []>("PRAGMA table_info(pins)").all();
+    if (!columns.some((c) => c.name === "session_id")) return;
+    this.db.transaction(() => {
+      this.db.exec(`
+        CREATE TABLE pins_by_key (
+          pin_key    TEXT PRIMARY KEY,
+          position   INTEGER NOT NULL,
+          character  TEXT NOT NULL,
+          color      TEXT,
+          created_at INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO pins_by_key (pin_key, position, character, color, created_at)
+          SELECT COALESCE(s.name, p.session_id), p.position, p.character, p.color, p.created_at
+          FROM pins p LEFT JOIN sessions s ON s.id = p.session_id ORDER BY p.position;
+        DROP TABLE pins;
+        ALTER TABLE pins_by_key RENAME TO pins;
+      `);
+    })();
   }
 
   /**
@@ -164,6 +192,33 @@ export class Store {
       this.db.query("UPDATE OR IGNORE pins SET pin_key = ? WHERE pin_key = ?").run(to, from);
       this.db.query("DELETE FROM pins WHERE pin_key = ?").run(from);
     })();
+  }
+
+  /**
+   * Copies pins, with the sessions they point at, from another agent's database (claude-panel's,
+   * whose pins go by session id). Does nothing once this store has pins of its own. Returns how
+   * many pins it copied.
+   */
+  importPinsFrom(path: string): number {
+    if (!existsSync(path) || this.db.query("SELECT 1 FROM pins LIMIT 1").get()) return 0;
+    this.db.query("ATTACH DATABASE ? AS source").run(path);
+    try {
+      return this.db.transaction(() => {
+        this.db.exec(`
+          INSERT OR IGNORE INTO sessions (id, name, cwd, state, activity, live, pid, state_since, last_event_at)
+          SELECT id, name, cwd, state, activity, live, pid, state_since, last_event_at FROM source.sessions
+          WHERE id IN (SELECT session_id FROM source.pins)`);
+        return this.db
+          .query(
+            `INSERT OR IGNORE INTO pins (pin_key, position, character, color, created_at)
+             SELECT COALESCE(s.name, p.session_id), p.position, p.character, p.color, p.created_at
+             FROM source.pins p LEFT JOIN source.sessions s ON s.id = p.session_id ORDER BY p.position`,
+          )
+          .run().changes;
+      })();
+    } finally {
+      this.db.exec("DETACH DATABASE source");
+    }
   }
 
   close() {

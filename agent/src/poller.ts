@@ -1,9 +1,8 @@
 import type { SessionHub } from "./hub.ts";
 import type { AgentEntry } from "./state.ts";
-import { workspaceAgents } from "./workspace-sessions.ts";
 
-/** Feeds the workspace's `claude agents --json` to the hub every `intervalMs`. Returns a stop function. */
-export function startPoller(hub: SessionHub, intervalMs = 3000, list: () => Promise<AgentEntry[]> = () => workspaceAgents()) {
+/** Feeds the running sessions `list` gives, from `claude agents --json`, to the hub every `intervalMs`. Returns a stop function. */
+export function startPoller(hub: SessionHub, intervalMs: number, list: () => Promise<AgentEntry[]>) {
   let stopped = false;
   let lastError = "";
 

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { followGhosttyFocus } from "./ghostty-focus.ts";
 import { parseProcessTable, parseWatcherLine, sessionOnTty, ttyChain, WATCHER_MARKER, watcherScript } from "./ghostty.ts";
-import { openSession } from "./open-session.ts";
 
 const A = "0603472f-b7c5-4dae-b7a1-142468264b30";
 const B = "34446bd8-9f71-4831-9f0b-d6094803dee2";
@@ -108,31 +107,5 @@ describe("followGhosttyFocus", () => {
     await Bun.sleep(40);
     expect(focused.at(-1)).toBe(B);
     stop();
-  });
-});
-
-describe("openSession", () => {
-  test("focuses the panel on the session's tty chain", async () => {
-    const asked: string[][] = [];
-    const result = await openSession(704, { table: async () => table, focus: async (ttys) => (asked.push(ttys), true) });
-    expect(result).toEqual({ ok: true, focused: true });
-    expect(asked).toEqual([["/dev/ttys009", "/dev/ttys005"]]);
-  });
-
-  test("a session that isn't running only activates Ghostty", async () => {
-    const asked: string[][] = [];
-    const result = await openSession(null, { table: async () => table, focus: async (ttys) => (asked.push(ttys), false) });
-    expect(result).toEqual({ ok: true, focused: false });
-    expect(asked).toEqual([[]]);
-  });
-
-  test("an AppleScript failure is reported, not thrown", async () => {
-    const result = await openSession(602, {
-      table: async () => table,
-      focus: async () => {
-        throw new Error("Not authorized to send Apple events to Ghostty. (-1743)");
-      },
-    });
-    expect(result).toEqual({ ok: false, error: "Ghostty: Not authorized to send Apple events to Ghostty. (-1743)" });
   });
 });

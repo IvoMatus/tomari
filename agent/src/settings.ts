@@ -1,24 +1,24 @@
 import { copyFile, mkdir } from "node:fs/promises";
-import { BACKUP_DIR, CLAUDE_SETTINGS } from "./config.ts";
+import { BACKUP_DIR } from "./config.ts";
 import { hasPanelHooks, mergeHooks, type Settings } from "./hooks-config.ts";
 
-async function readSettings(path = CLAUDE_SETTINGS): Promise<Settings> {
+async function readSettings(path: string): Promise<Settings> {
   const file = Bun.file(path);
   return (await file.exists()) ? await file.json() : {};
 }
 
 /** The settings file as it would be with our hooks added (`install`) or removed. */
-export async function previewHooks({ install }: { install: boolean }, path = CLAUDE_SETTINGS): Promise<string> {
+export async function previewHooks({ install }: { install: boolean }, path: string): Promise<string> {
   return JSON.stringify(mergeHooks(await readSettings(path), { install }), null, 2) + "\n";
 }
 
 /**
- * Adds or removes our hooks in the workspace's .claude/settings.json, copying the file into
+ * Adds or removes our hooks in the Claude Code settings file at `path`, copying the file into
  * BACKUP_DIR first. Writes nothing when the hooks are already as asked.
  */
 export async function writeHooks(
   { install }: { install: boolean },
-  path = CLAUDE_SETTINGS,
+  path: string,
   backupDir = BACKUP_DIR,
 ): Promise<{ changed: boolean; backup: string | null }> {
   const exists = await Bun.file(path).exists();
@@ -35,6 +35,6 @@ export async function writeHooks(
   return { changed: true, backup };
 }
 
-export async function hooksInstalled(path = CLAUDE_SETTINGS) {
+export async function hooksInstalled(path: string) {
   return hasPanelHooks(await readSettings(path));
 }

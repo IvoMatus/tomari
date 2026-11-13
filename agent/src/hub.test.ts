@@ -15,9 +15,9 @@ const ev = (session_id: string, hook_event_name: string, extra: Record<string, u
   ...extra,
 });
 
-function setup(store = new Store(), start = 1_000_000) {
+function setup(store = new Store(), start = 1_000_000, sameNames = true) {
   let now = start;
-  const hub = new SessionHub(store, () => now);
+  const hub = new SessionHub(store, () => now, sameNames);
   const changes: HubChange[] = [];
   hub.subscribe((c) => changes.push(c));
   return { hub, store, changes, tick: (ms: number) => (now += ms) };
@@ -238,6 +238,47 @@ describe("SessionHub", () => {
   });
 });
 
+describe("SessionHub in the Claude app, where a session keeps its id", () => {
+  const titled = (sessionId: string, name: string) => ({ sessionId, name, cwd: "/Users/dev/app", pid: 1, status: "idle" as const, startedAt: 0 });
+  const app = (store = new Store()) => setup(store, 1_000_000, false);
+
+  test("adopting starts tracking a session that isn't running; a known one is left alone", () => {
+    const { hub, changes } = app();
+    hub.adopt(A, "Idle work", "/Users/dev/idle", 5000);
+    expect(hub.get(A)).toMatchObject({ name: "Idle work", cwd: "/Users/dev/idle", state: "ended", live: false, stateSince: 5000 });
+    expect(changes).toHaveLength(1);
+
+    hub.adopt(A, "Other title", "/elsewhere", 9000);
+    expect(hub.get(A)!.name).toBe("Idle work");
+    expect(changes).toHaveLength(1);
+  });
+
+  test("two closed sessions with the same title both stay, also after a restart", () => {
+    const { hub, store } = app();
+    hub.adopt(A, "Fix the build", "/Users/dev/one", 5000);
+    hub.adopt(B, "Fix the build", "/Users/dev/two", 6000);
+    expect(hub.snapshot().map((s) => s.id).sort()).toEqual([A, B].sort());
+    expect(app(store).hub.snapshot()).toHaveLength(2);
+  });
+
+  test("a pinned session keeps its pin and icon when the app retitles it", () => {
+    const { hub } = app();
+    hub.adopt(A, "Idle work", "/Users/dev/idle", 5000);
+    hub.setIcon(A, { character: "owl", color: "#4f7cff" });
+    hub.handleAgents([titled(A, "Migrate the database")]);
+    expect(hub.get(A)).toMatchObject({ name: "Migrate the database", live: true, pinned: true, icon: { character: "owl", color: "#4f7cff" } });
+  });
+
+  test("switching to a host that reopens sessions under new ids merges the same names", () => {
+    const { hub, changes } = app();
+    hub.adopt(A, "composer", "/Users/dev/cenco", 5000);
+    hub.adopt(B, "composer", "/Users/dev/cenco", 6000);
+    hub.replaceSameNames(true);
+    expect(hub.snapshot().map((s) => s.id)).toEqual([B]);
+    expect(changes.at(-1)).toEqual({ type: "removed", id: A });
+  });
+});
+
 describe("parseClientMessage", () => {
   test("accepts the whitelisted commands", () => {
     expect(parseClientMessage(JSON.stringify({ type: "library" }))).toEqual({ type: "library" });
@@ -248,6 +289,8 @@ describe("parseClientMessage", () => {
       id: A,
       icon: { character: "crab", color: "#ff6a1a" },
     });
+    expect(parseClientMessage(JSON.stringify({ type: "host", host: "ghostty" }))).toEqual({ type: "host", host: "ghostty" });
+    expect(parseClientMessage(JSON.stringify({ type: "host", host: "desktop" }))).toEqual({ type: "host", host: "desktop" });
   });
 
   test("rejects everything else", () => {
@@ -258,6 +301,8 @@ describe("parseClientMessage", () => {
       JSON.stringify({ type: "exec", id: A, command: "ls" }),
       JSON.stringify({ type: "pin", id: A, pinned: "yes" }),
       JSON.stringify({ type: "icon", id: A, icon: { character: "../etc", color: "#fff" } }),
+      JSON.stringify({ type: "host", host: "iterm" }),
+      JSON.stringify({ type: "host" }),
     ];
     for (const raw of bad) expect(parseClientMessage(raw)).toBeNull();
   });

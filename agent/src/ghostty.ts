@@ -150,7 +150,9 @@ async function osascript(script: string, args: string[] = []): Promise<string> {
 
 async function* lines(stream: ReadableStream<Uint8Array>) {
   let buffer = "";
-  for await (const chunk of stream.pipeThrough(new TextDecoderStream())) {
+  const decoder = new TextDecoder();
+  for await (const bytes of stream) {
+    const chunk = decoder.decode(bytes, { stream: true });
     buffer += chunk;
     for (let end = buffer.indexOf("\n"); end >= 0; end = buffer.indexOf("\n")) {
       yield buffer.slice(0, end);

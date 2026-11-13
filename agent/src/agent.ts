@@ -1,7 +1,9 @@
 import { PANEL_PORT } from "../../shared/protocol.ts";
 import { startColorWatcher } from "./claude-colors.ts";
-import { HOOK_PORT, loadConfig, panelUrls, WORKSPACE } from "./config.ts";
-import { followGhosttyFocus } from "./ghostty-focus.ts";
+import { HOOK_PORT, loadConfig, panelUrls, saveHost, WORKSPACE } from "./config.ts";
+import { desktopHost } from "./desktop-host.ts";
+import { ghosttyHost } from "./ghostty-host.ts";
+import { HostSwitch } from "./host.ts";
 import { SessionHub } from "./hub.ts";
 import { startPoller } from "./poller.ts";
 import { startServers } from "./server.ts";
@@ -11,16 +13,18 @@ import { Store } from "./store.ts";
 export async function runAgent({ lan }: { lan: boolean }) {
   const config = await loadConfig();
   const store = new Store(config.dbPath);
-  const hub = new SessionHub(store);
+  // The host in use says whether same-named sessions replace each other; until then, none do.
+  const hub = new SessionHub(store, Date.now, false);
+  const hosts = new HostSwitch({ desktop: desktopHost(hub), ghostty: ghosttyHost(hub) }, config.host, hub, saveHost);
   const servers = startServers({
     hub,
+    hosts,
     token: config.token,
     hookPort: HOOK_PORT,
     panelPort: PANEL_PORT,
     panelHost: lan ? "0.0.0.0" : "127.0.0.1",
   });
-  const stopPoller = startPoller(hub);
-  const stopFocus = followGhosttyFocus(hub);
+  const stopPoller = startPoller(hub, 3000, () => hosts.current.sessions());
   const stopColors = startColorWatcher(hub);
   const pruneTimer = setInterval(() => hub.prune(), 10 * 60 * 1000);
 
@@ -32,19 +36,21 @@ export async function runAgent({ lan }: { lan: boolean }) {
     const flags = `${s.live ? "" : " (not live)"}${s.pinned ? " ★" : ""}`;
     console.log(`${time}  ${s.id.slice(0, 8)}  ${s.state.padEnd(16)} ${s.name}${flags}  ${s.activity ?? ""}`);
   });
+  hosts.subscribe((host) => console.log(`${new Date().toLocaleTimeString("en-GB", { hour12: false })}  host → ${host}`));
 
   const urls = lan ? await panelUrls() : [`ws://127.0.0.1:${PANEL_PORT}/ws`];
   console.log(`perch-terminal agent
   hooks     : http://127.0.0.1:${HOOK_PORT}/hook
   panel     : ${urls.join("  ")}
   data      : ${config.dbPath}
-  workspace : ${WORKSPACE}
+  host      : ${config.host}
+  workspace : ${WORKSPACE} (Ghostty host only)
 `);
 
   function shutdown() {
     clearInterval(pruneTimer);
     stopPoller();
-    stopFocus();
+    hosts.stop();
     stopColors();
     servers.stop();
     store.close();

@@ -10,27 +10,55 @@ A floating strip on the edge of your Mac's screen with one animated pixel-art cr
 
 > **Early development.** Expect rough edges. macOS 14 or newer only.
 
-## Fork para Ghostty (perch-terminal)
+## Fork: app de Claude o terminal (perch-terminal)
 
-Este repositorio es un fork local de [Tomari](https://github.com/elrincondeldev/tomari) (antes Perch) (licencia MIT) para sesiones de Claude Code abiertas en terminales de Ghostty, no en la app de escritorio de Claude. Qué cambia respecto del original:
+Este repositorio es un fork de [Tomari](https://github.com/elrincondeldev/tomari) (antes Perch, licencia MIT) que agrega una opción: dónde se abren las sesiones, el **host**. Hay dos:
 
-- **Clic en una criatura**: enfoca el panel de Ghostty donde corre la sesión, buscando el tty del proceso de Claude (o el de un proceso padre, como la terminal de nvim). Si no lo encuentra, solo activa Ghostty. Nunca abre la app de escritorio ni hace `claude --resume`.
-- **Sesión al frente**: la terminal enfocada de la pestaña seleccionada de la ventana del frente de Ghostty, consultada por AppleScript con un `osascript` persistente que termina junto con el agente.
-- **Lista del +**: las sesiones vivas de `claude agents --json` cuyo cwd está bajo `~/cenco`. El agente ignora las sesiones de otras carpetas.
-- **Pins, personaje y color**: se guardan por nombre de sesión (`claude -n composer`), así que se conservan cuando la sesión se vuelve a abrir con otro sessionId.
-- **Color de Claude**: cada criatura usa el color de su sesión, que es su `/color` o, si no tiene, el `color:` del agente con que se abrió (`claude --agent`). Un color elegido en el menú gana; quitar el pin vuelve al de Claude. Se lee de archivos internos de Claude Code (`~/.claude/sessions/<pid>.json` y el transcript de la sesión); si cambian, las criaturas quedan con el color predeterminado. El rojo de Claude no está en el menú de colores.
-- **Personajes nuevos**: Owl, Frog, Crab y Pou, además de los cuatro originales. Las plantillas aceptan `W` (blanco fijo), que usa Pou en los ojos.
-- **Sin LaunchAgents**: no hay `setup` ni `uninstall`. Se arranca con `bin/perch-up` y se detiene con `bin/perch-down`.
-- **Datos aparte del original**: `~/Library/Application Support/perch-terminal`, logs en `~/Library/Logs/perch-terminal` y defaults en `local.perch-terminal`. Los puertos siguen siendo 7777 y 7778, así que no puede correr a la vez que el Tomari original.
-- **Hooks en el proyecto**: van en `~/cenco/.claude/settings.json`, no en `~/.claude/settings.json`. `tomari hooks` muestra cómo quedaría ese archivo; `tomari hooks --install` y `--remove` lo modifican, con respaldo previo en `…/perch-terminal/backups`.
+| | `app` (la app de escritorio de Claude) | `ghostty` (terminales de Ghostty) |
+|---|---|---|
+| **Clic en una criatura** | Abre la sesión en la app, con su enlace `claude://`, o con `claude --desktop --resume` si la app no la conoce. | Enfoca el panel de Ghostty donde corre la sesión, buscando el tty del proceso de Claude (o el de un proceso padre, como la terminal de nvim). Si no lo encuentra, solo activa Ghostty. Nunca inicia ni reanuda una sesión. |
+| **Sesión al frente** | La que la app registra en `~/Library/Logs/Claude/main.log`. | La terminal enfocada de la pestaña seleccionada de la ventana del frente, consultada por AppleScript con un `osascript` persistente que termina junto con el agente. |
+| **Lista del +** | Las sesiones de la app que no están archivadas, corran o no. | Las sesiones vivas de `claude agents --json` cuyo cwd está bajo `~/cenco`. |
+| **Sesiones que se siguen** | Todas las de `claude agents --json`. | Solo las de `~/cenco`. |
+| **Hooks** | `~/.claude/settings.json` | `~/cenco/.claude/settings.json` |
+| **Sesiones con el mismo nombre** | Son sesiones distintas: en la app cada una conserva su id. | Son la misma: al reabrir `claude -n composer` cambia el id, así que la nueva reemplaza a la cerrada. |
+
+El modo `ghostty` necesita Ghostty 1.4 o más nuevo, por su AppleScript. Mientras no se elija un host, se usa `app`, como en el Tomari original.
+
+### Cambiar de host
 
 ```bash
-bin/perch-up                         # compila lo que cambió y levanta el agente y la franja en segundo plano
-bin/perch-down                       # los detiene
-.build/perch-terminal/perch status   # ¿responde el agente? ¿están los hooks?
+tomari host            # muestra el host guardado
+tomari host ghostty    # o: tomari host app
 ```
 
-Necesita Ghostty 1.4 o más nuevo (por su AppleScript), Bun y las Command Line Tools de Xcode. El resto de este README describe el Tomari original; `npx @elrincondeldev/tomari`, `npm/`, `scripts/release.ts` y el workflow de release no se usan en este fork.
+También está en el menú de la barra: **Open Sessions In → Claude App / Ghostty**. En ambos casos el agente cambia en el momento, sin reiniciar: detiene el seguimiento de foco del host anterior, arranca el del nuevo y guarda la elección en el campo `host` de `config.json`. Si el agente no está corriendo, `tomari host` solo guarda la elección para el próximo arranque.
+
+Cambiar de host no mueve los hooks. `tomari host` avisa si faltan en el archivo del host elegido; `tomari hooks` muestra cómo quedaría ese archivo, y `tomari hooks --install` y `--remove` lo modifican, con respaldo previo en `…/perch-terminal/backups`. Sin hooks, el estado de las sesiones sale solo del sondeo de `claude agents`, con menos detalle.
+
+Para agregar otra terminal hay que implementar la interfaz `SessionHost` de [`agent/src/host.ts`](agent/src/host.ts), como hace [`ghostty-host.ts`](agent/src/ghostty-host.ts), y sumar su id a `SESSION_HOSTS` en `shared/protocol.ts` y a `SessionHost` en `Sources/TomariCore/Protocol.swift`.
+
+### Qué más cambia respecto del original
+
+- **Pins, personaje y color por nombre**: se guardan por nombre de sesión (`claude -n composer`), así que en Ghostty se conservan cuando la sesión se vuelve a abrir con otro id. En la app, el pin sigue a su sesión aunque la app le cambie el título. Dos sesiones con el mismo nombre comparten pin, personaje y color en ambos modos.
+- **Color de Claude**: cada criatura usa el color de su sesión, que es su `/color` o, si no tiene, el `color:` del agente con que se abrió (`claude --agent`). Un color elegido en el menú gana; quitar el pin vuelve al de Claude. Se lee de archivos internos de Claude Code (`~/.claude/sessions/<pid>.json` y el transcript de la sesión); si cambian, las criaturas quedan con el color predeterminado. El rojo de Claude no está en el menú de colores.
+- **Personajes nuevos**: Owl, Frog, Crab y Pou, además de los cuatro originales. Las plantillas aceptan `W` (blanco fijo), que usa Pou en los ojos.
+- **Datos aparte del original**: `~/Library/Application Support/perch-terminal`, logs en `~/Library/Logs/perch-terminal` y defaults en `local.perch-terminal`. Los puertos siguen siendo 7777 y 7778, y los LaunchAgents usan las mismas etiquetas, así que no puede convivir con una instalación del Tomari original.
+
+### Instalar y arrancar
+
+`tomari setup [--host app|ghostty]` instala los binarios, los hooks del host y los LaunchAgents, como en el original; `tomari uninstall` los quita. Necesita un build de release, con `tomari`, `tomari-overlay` y `Tomari_TomariCore.bundle` en la misma carpeta.
+
+Para desarrollo hay un atajo que no instala nada ni arranca al iniciar sesión:
+
+```bash
+bin/perch-up                          # compila lo que cambió y levanta el agente y la franja en segundo plano
+bin/perch-down                        # los detiene
+.build/perch-terminal/perch status    # host en uso, ¿responde el agente?, ¿están los hooks?
+.build/perch-terminal/perch host app  # cambia de host con el agente corriendo
+```
+
+Necesita Bun y las Command Line Tools de Xcode. El resto de este README describe el Tomari original; `npx @elrincondeldev/tomari`, `npm/`, `scripts/release.ts` y el workflow de release no se usan en este fork.
 
 ## Install
 

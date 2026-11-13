@@ -4,7 +4,10 @@
  *
  * Pins, characters and colors belong to the session's name (`claude -n composer`), not to its
  * id: reopening a named session gives it a new id, and the new session inherits them. Its old,
- * closed record is then forgotten, so one name never shows twice.
+ * closed record is then forgotten, so one name never shows twice. That holds for hosts where a
+ * reopened session gets a new id (SessionHost.reopensUnderNewId); where a session keeps its id,
+ * as in the desktop app, two sessions may share a title, and a pin follows its session through
+ * a retitle.
  *
  * A creature wears Claude's color for its session unless the user picked another one in the strip.
  */
@@ -31,15 +34,22 @@ export class SessionHub {
   private records = new Map<string, SessionRecord>();
   private pins: Map<string, Pin>;
   private listeners = new Set<HubListener>();
-  /** Session in front in Ghostty; not persisted. */
+  /** Session in front in the host; not persisted. */
   focusedId: string | null = null;
 
   constructor(
     private store: Store,
     private now: () => number = Date.now,
+    private sameNames = true,
   ) {
     for (const rec of store.loadSessions()) this.records.set(rec.id, rec);
     this.pins = store.loadPins();
+    this.replaceSameNames(sameNames);
+  }
+
+  /** Whether a session replaces a closed one of the same name; turning it on applies it to the sessions already known. */
+  replaceSameNames(on: boolean) {
+    this.sameNames = on;
     for (const name of new Set([...this.records.values()].map((r) => r.name))) this.dedupe(name);
   }
 
@@ -82,6 +92,12 @@ export class SessionHub {
     // Dedupe after the whole poll: the old record of a reopened name may be marked ended later in the batch.
     for (const rec of changed) this.commit(rec, false);
     for (const name of new Set(changed.map((r) => r.name))) this.dedupe(name);
+  }
+
+  /** Starts tracking a session that is not running, e.g. a desktop session about to be pinned. No-op if known. */
+  adopt(id: string, name: string | null, cwd: string, since: number) {
+    if (this.records.has(id)) return;
+    this.commit({ id, name, cwd, state: "ended", activity: null, live: false, pid: null, stateSince: since, lastEventAt: 0, color: null });
   }
 
   /** False if the session is unknown. */
@@ -133,9 +149,9 @@ export class SessionHub {
     const prev = this.records.get(next.id);
     this.records.set(next.id, next);
     this.store.saveSession(next);
-    // Pinned before the poll named it: the pin moves from the id to the name.
-    if (prev?.name === null && next.name !== null && this.pins.has(prev.id)) {
-      this.store.movePin(prev.id, next.name);
+    // Pinned before the poll named it: the pin moves from the id to the name. Where a session keeps its id, also on a retitle.
+    if (prev && (prev.name === null || !this.sameNames) && pinKey(prev) !== pinKey(next) && this.pins.has(pinKey(prev))) {
+      this.store.movePin(pinKey(prev), pinKey(next));
       this.pins = this.store.loadPins();
     }
     if (!prev || VISIBLE.some((k) => prev[k] !== next[k])) {
@@ -146,7 +162,7 @@ export class SessionHub {
 
   /** Of the records sharing a name, keeps the running ones, or else the latest; forgets the rest. */
   private dedupe(name: string | null) {
-    if (name === null) return;
+    if (name === null || !this.sameNames) return;
     const same = [...this.records.values()].filter((r) => r.name === name);
     if (same.length < 2) return;
     const live = same.filter((r) => r.live);

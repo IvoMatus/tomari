@@ -69,3 +69,52 @@ test("a database from before Claude's colors keeps its pins and characters, and 
   expect(reopened.loadPins().get("composer")).toEqual({ key: "composer", position: 0, character: "robot", color: "#4f7cff" });
   reopened.close();
 });
+
+/** A database as Tomari and claude-panel wrote it before pins went by name: pins keyed by session id, with a color. */
+function byIdDb() {
+  const dir = mkdtempSync(`${tmpdir()}/tomari-store-`);
+  dirs.push(dir);
+  const path = `${dir}/panel.db`;
+  const old = new Database(path, { create: true });
+  old.exec(`
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, name TEXT, cwd TEXT NOT NULL, state TEXT NOT NULL, activity TEXT,
+      live INTEGER NOT NULL, pid INTEGER, state_since INTEGER NOT NULL, last_event_at INTEGER NOT NULL);
+    CREATE TABLE pins (session_id TEXT PRIMARY KEY, position INTEGER NOT NULL, character TEXT NOT NULL,
+      color TEXT NOT NULL, created_at INTEGER NOT NULL);
+    INSERT INTO sessions VALUES ('${ID}', 'Idle work', '/Users/dev/idle', 'ended', NULL, 0, NULL, 5, 5);
+    INSERT INTO sessions VALUES ('${OTHER}', NULL, '/Users/dev/other', 'ended', NULL, 0, NULL, 6, 6);
+    INSERT INTO sessions VALUES ('${UNPINNED}', 'Scratch', '/tmp', 'ended', NULL, 0, NULL, 7, 7);
+    INSERT INTO pins VALUES ('${ID}', 0, 'cat', '#4f7cff', 1), ('${OTHER}', 1, 'ghost', '#ffd23f', 2);
+  `);
+  old.close();
+  return path;
+}
+const OTHER = "22222222-2222-2222-2222-222222222222";
+const UNPINNED = "33333333-3333-3333-3333-333333333333";
+
+test("a database with pins by session id opens with them under the session's name, colors kept", () => {
+  const store = new Store(byIdDb());
+  expect([...store.loadPins().values()]).toEqual([
+    { key: "Idle work", position: 0, character: "cat", color: "#4f7cff" },
+    { key: OTHER, position: 1, character: "ghost", color: "#ffd23f" },
+  ]);
+  expect(store.loadSessions()).toHaveLength(3);
+});
+
+test("imports claude-panel's pins with their sessions, so pinned closed sessions still show", () => {
+  const store = new Store();
+  expect(store.importPinsFrom(byIdDb())).toBe(2);
+  expect([...store.loadPins().values()]).toEqual([
+    { key: "Idle work", position: 0, character: "cat", color: "#4f7cff" },
+    { key: OTHER, position: 1, character: "ghost", color: "#ffd23f" },
+  ]);
+  expect(store.loadSessions().map((s) => s.id).sort()).toEqual([ID, OTHER]);
+});
+
+test("imports nothing once the store has pins of its own, or from a missing database", () => {
+  const store = new Store();
+  store.pin("composer");
+  expect(store.importPinsFrom(byIdDb())).toBe(0);
+  expect([...store.loadPins().keys()]).toEqual(["composer"]);
+  expect(new Store().importPinsFrom("/nonexistent/panel.db")).toBe(0);
+});
