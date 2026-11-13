@@ -15,7 +15,9 @@ export async function runAgent({ lan }: { lan: boolean }) {
   const store = new Store(config.dbPath);
   // The host in use says whether same-named sessions replace each other; until then, none do.
   const hub = new SessionHub(store, Date.now, false);
-  const hosts = new HostSwitch({ desktop: desktopHost(hub), ghostty: ghosttyHost(hub) }, config.host, hub, saveHost);
+  const ghostty = ghosttyHost(hub);
+  const desktop = desktopHost(hub, { inTerminal: (id) => ghostty.open(id) });
+  const hosts = new HostSwitch({ desktop, ghostty }, config.host, hub, saveHost);
   const servers = startServers({
     hub,
     hosts,

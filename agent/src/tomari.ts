@@ -29,6 +29,7 @@ try {
       if (!live) await saveHost(command.host);
       const settings = claudeSettings(command.host);
       console.log(`host: ${command.host}${live ? " (the running agent switched)" : " (saved; the agent uses it when it starts)"}`);
+      console.log("sessions already running stay where they are: the host decides where the ones you open from now on go");
       if (!(await hooksInstalled(settings))) console.log(`the hooks are not in ${settings}: add them with \`tomari hooks --install\``);
       break;
     }

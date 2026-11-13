@@ -51,6 +51,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
                 choice.state = host == current ? .on : .off
                 hosts.addItem(choice)
             }
+            hosts.addItem(.separator())
+            hosts.addItem(withTitle: SessionHost.switchNote, action: nil, keyEquivalent: "")
             let hostItem = NSMenuItem(title: "Open Sessions In", action: nil, keyEquivalent: "")
             hostItem.submenu = hosts
             menu.addItem(hostItem)

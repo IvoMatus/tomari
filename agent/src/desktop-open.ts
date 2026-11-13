@@ -14,7 +14,8 @@ import { isSessionId } from "./protocol-guard.ts";
 const LOCAL_ID = /^local_[A-Za-z0-9-]{1,64}$/;
 const LIVE_DIR = `${homedir()}/.claude/sessions`;
 
-export type OpenResult = { ok: true; command: string[] } | { ok: false; error: string };
+/** `inTerminal` marks a refusal because the session is running in a terminal, where it can be brought forward instead. */
+export type OpenResult = { ok: true; command: string[] } | { ok: false; error: string; inTerminal?: true };
 
 interface LiveSession {
   pid: number;
@@ -53,7 +54,7 @@ export async function planOpen(
   }
   const live = await findLive(sessionId, liveDir);
   if (live) {
-    return { ok: false, error: `running outside the desktop app (${live.entrypoint}, pid ${live.pid}): open it in its terminal` };
+    return { ok: false, error: `running outside the desktop app (${live.entrypoint}, pid ${live.pid}): open it in its terminal`, inTerminal: true };
   }
   return { ok: true, command: ["claude", "--desktop", "--resume", sessionId] };
 }

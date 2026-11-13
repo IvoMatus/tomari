@@ -15,6 +15,9 @@ public enum SessionHost: String, CaseIterable, Sendable, Decodable {
         case .ghostty: return "Ghostty"
         }
     }
+
+    /// Shown under the choices: switching host moves no session.
+    public static let switchNote = "Running sessions stay where they are"
 }
 
 public enum SessionState: String, CaseIterable, Sendable, Decodable {

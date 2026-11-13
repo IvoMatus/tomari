@@ -1,14 +1,16 @@
 /**
  * Sessions in the Claude desktop app. The app keeps a session's id for as long as it lists it,
  * and stops its process while it sits idle, so the + menu also offers sessions that aren't
- * running: pinning one adopts it from the app's metadata.
+ * running: pinning one adopts it from the app's metadata. A session still running in a terminal
+ * is never resumed in the app, which would start a second process on the same conversation: it
+ * is brought to the front where it runs.
  */
 import { basename } from "node:path";
 import type { LibraryEntry } from "../../shared/protocol.ts";
 import { watchDesktopFocus } from "./desktop-focus.ts";
 import { openSession, type OpenResult as DesktopOpenResult } from "./desktop-open.ts";
 import { listDesktopSessions, type DesktopSession } from "./desktop-sessions.ts";
-import { LIBRARY_SIZE, type SessionHost } from "./host.ts";
+import { LIBRARY_SIZE, type OpenResult, type SessionHost } from "./host.ts";
 import type { SessionHub } from "./hub.ts";
 import type { AgentEntry } from "./state.ts";
 import { claudeAgents } from "./workspace-sessions.ts";
@@ -19,11 +21,13 @@ export interface DesktopDeps {
   desktopSessions?: () => Promise<DesktopSession[]>;
   open?: (sessionId: string, cwd?: string) => Promise<DesktopOpenResult>;
   watch?: (onFocus: (sessionId: string | null) => void) => () => void;
+  /** Brings forward a session that runs in a terminal; without it, the strip is told to go to its terminal. */
+  inTerminal?: (sessionId: string) => Promise<OpenResult>;
 }
 
 export function desktopHost(
   hub: SessionHub,
-  { list = claudeAgents, desktopSessions = () => listDesktopSessions(), open = openSession, watch = watchDesktopFocus }: DesktopDeps = {},
+  { list = claudeAgents, desktopSessions = () => listDesktopSessions(), open = openSession, watch = watchDesktopFocus, inTerminal }: DesktopDeps = {},
 ): SessionHost {
   return {
     id: "desktop",
@@ -33,7 +37,9 @@ export function desktopHost(
     async open(sessionId) {
       const result = await open(sessionId, hub.get(sessionId)?.cwd);
       // The desktop log confirms focus a moment later; the caller shows it right away.
-      return result.ok ? { focused: true } : { focused: false, message: result.error };
+      if (result.ok) return { focused: true };
+      if (result.inTerminal && inTerminal) return inTerminal(sessionId);
+      return { focused: false, message: result.error };
     },
 
     followFocus: () => watch((id) => hub.setFocused(id)),

@@ -16,7 +16,7 @@ Este repositorio es un fork de [Tomari](https://github.com/elrincondeldev/tomari
 
 | | `app` (la app de escritorio de Claude) | `ghostty` (terminales de Ghostty) |
 |---|---|---|
-| **Clic en una criatura** | Abre la sesión en la app, con su enlace `claude://`, o con `claude --desktop --resume` si la app no la conoce. | Enfoca el panel de Ghostty donde corre la sesión, buscando el tty del proceso de Claude (o el de un proceso padre, como la terminal de nvim). Si no lo encuentra, solo activa Ghostty. Nunca inicia ni reanuda una sesión. |
+| **Clic en una criatura** | Abre la sesión en la app, con su enlace `claude://`, o con `claude --desktop --resume` si la app no la conoce. Si la sesión corre en una terminal, enfoca su panel de Ghostty. | Enfoca el panel de Ghostty donde corre la sesión, buscando el tty del proceso de Claude (o el de un proceso padre, como la terminal de nvim). Si no lo encuentra, solo activa Ghostty. Nunca inicia ni reanuda una sesión. |
 | **Sesión al frente** | La que la app registra en `~/Library/Logs/Claude/main.log`. | La terminal enfocada de la pestaña seleccionada de la ventana del frente, consultada por AppleScript con un `osascript` persistente que termina junto con el agente. |
 | **Lista del +** | Las sesiones de la app que no están archivadas, corran o no. | Las sesiones vivas de `claude agents --json` cuyo cwd está bajo `~/cenco`. |
 | **Sesiones que se siguen** | Todas las de `claude agents --json`. | Solo las de `~/cenco`. |
@@ -34,7 +34,9 @@ tomari host ghostty    # o: tomari host app
 
 También está en el menú de la barra: **Open Sessions In → Claude App / Ghostty**. En ambos casos el agente cambia en el momento, sin reiniciar: detiene el seguimiento de foco del host anterior, arranca el del nuevo y guarda la elección en el campo `host` de `config.json`. Si el agente no está corriendo, `tomari host` solo guarda la elección para el próximo arranque.
 
-Cambiar de host no mueve los hooks. `tomari host` avisa si faltan en el archivo del host elegido; `tomari hooks` muestra cómo quedaría ese archivo, y `tomari hooks --install` y `--remove` lo modifican, con respaldo previo en `…/perch-terminal/backups`. Sin hooks, el estado de las sesiones sale solo del sondeo de `claude agents`, con menos detalle.
+Cambiar de host no mueve ninguna sesión: vale para las que se abran desde ese momento. Una sesión que sigue corriendo en Ghostty se queda ahí, y en modo `app` el clic enfoca su panel de Ghostty en vez de reanudarla en la app, porque eso dejaría dos procesos sobre la misma conversación. El menú lo recuerda con la línea "Running sessions stay where they are".
+
+Cambiar de host tampoco mueve los hooks. `tomari host` avisa si faltan en el archivo del host elegido; `tomari hooks` muestra cómo quedaría ese archivo, y `tomari hooks --install` y `--remove` lo modifican, con respaldo previo en `…/perch-terminal/backups`. Sin hooks, el estado de las sesiones sale solo del sondeo de `claude agents`, con menos detalle.
 
 Para agregar otra terminal hay que implementar la interfaz `SessionHost` de [`agent/src/host.ts`](agent/src/host.ts), como hace [`ghostty-host.ts`](agent/src/ghostty-host.ts), y sumar su id a `SESSION_HOSTS` en `shared/protocol.ts` y a `SessionHost` en `Sources/TomariCore/Protocol.swift`.
 

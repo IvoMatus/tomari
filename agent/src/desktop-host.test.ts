@@ -101,7 +101,7 @@ test("planOpen: deep link for desktop sessions (running or not), refuse terminal
 
     // process.pid makes the fake session count as running.
     writeFileSync(`${liveDir}/1.json`, JSON.stringify({ pid: process.pid, sessionId: ID, entrypoint: "cli" }));
-    expect((await planOpen(ID, dirs)).ok).toBe(false);
+    expect(await planOpen(ID, dirs)).toMatchObject({ ok: false, inTerminal: true });
 
     // Known to the desktop app: its link wins, whether or not a process runs.
     writeFileSync(`${desktopDir}/account/org/local_abc-123.json`, JSON.stringify({ sessionId: "local_abc-123", cliSessionId: ID }));
@@ -125,4 +125,24 @@ test("a closed session the app doesn't know is resumed from its own folder", asy
   const host = desktopHost(hub, { open: async (id, cwd) => (calls.push([id, cwd]), { ok: true, command: [] }), watch: () => () => {} });
   await host.open(ID);
   expect(calls).toEqual([[ID, "/Users/dev/old"]]);
+});
+
+test("a session still running in a terminal is brought to the front there, not resumed in the app", async () => {
+  const refusal = { ok: false as const, error: "running outside the desktop app (cli, pid 7): open it in its terminal", inTerminal: true };
+  const hub = new SessionHub(new Store(), Date.now, false);
+  const asked: string[] = [];
+  const host = desktopHost(hub, {
+    open: async () => refusal,
+    watch: () => () => {},
+    inTerminal: async (id) => (asked.push(id), { focused: true }),
+  });
+  expect(await host.open(ID)).toEqual({ focused: true });
+  expect(asked).toEqual([ID]);
+
+  const noPanel = desktopHost(hub, { open: async () => refusal, watch: () => () => {}, inTerminal: async () => ({ focused: false, message: "no Ghostty panel found; showed Ghostty" }) });
+  expect(await noPanel.open(ID)).toEqual({ focused: false, message: "no Ghostty panel found; showed Ghostty" });
+
+  const otherFailure = desktopHost(hub, { open: async () => ({ ok: false, error: "claude exited with 1" }), watch: () => () => {}, inTerminal: async (id) => (asked.push(id), { focused: true }) });
+  expect(await otherFailure.open(ID)).toEqual({ focused: false, message: "claude exited with 1" });
+  expect(asked).toEqual([ID]);
 });
