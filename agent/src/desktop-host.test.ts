@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { desktopHost } from "./desktop-host.ts";
-import { planOpen } from "./desktop-open.ts";
+import { planOpen, runOnTerminal } from "./desktop-open.ts";
 import type { DesktopSession } from "./desktop-sessions.ts";
 import { SessionHub } from "./hub.ts";
 import type { AgentEntry } from "./state.ts";
@@ -109,4 +109,20 @@ test("planOpen: deep link for desktop sessions (running or not), refuse terminal
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("commands run on a terminal, because `claude --desktop` refuses redirected output", async () => {
+  expect(await runOnTerminal(["sh", "-c", "test -t 1 && echo on-a-tty"])).toEqual({ code: 0, output: "on-a-tty" });
+  expect(await runOnTerminal(["sh", "-c", "printf '\\033[31mNo session found\\033[0m\\n'; exit 1"])).toEqual({ code: 1, output: "No session found" });
+  expect(await runOnTerminal(["sh", "-c", "pwd"], "/usr/bin")).toEqual({ code: 0, output: "/usr/bin" });
+  expect((await runOnTerminal(["sh", "-c", "pwd"], "/nonexistent/folder")).code).toBe(0);
+});
+
+test("a closed session the app doesn't know is resumed from its own folder", async () => {
+  const hub = new SessionHub(new Store(), Date.now, false);
+  hub.adopt(ID, "Old work", "/Users/dev/old", 5000);
+  const calls: [string, string | undefined][] = [];
+  const host = desktopHost(hub, { open: async (id, cwd) => (calls.push([id, cwd]), { ok: true, command: [] }), watch: () => () => {} });
+  await host.open(ID);
+  expect(calls).toEqual([[ID, "/Users/dev/old"]]);
 });

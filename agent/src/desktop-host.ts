@@ -17,7 +17,7 @@ import { claudeAgents } from "./workspace-sessions.ts";
 export interface DesktopDeps {
   list?: () => Promise<AgentEntry[]>;
   desktopSessions?: () => Promise<DesktopSession[]>;
-  open?: (sessionId: string) => Promise<DesktopOpenResult>;
+  open?: (sessionId: string, cwd?: string) => Promise<DesktopOpenResult>;
   watch?: (onFocus: (sessionId: string | null) => void) => () => void;
 }
 
@@ -31,7 +31,7 @@ export function desktopHost(
     sessions: list,
 
     async open(sessionId) {
-      const result = await open(sessionId);
+      const result = await open(sessionId, hub.get(sessionId)?.cwd);
       // The desktop log confirms focus a moment later; the caller shows it right away.
       return result.ok ? { focused: true } : { focused: false, message: result.error };
     },
