@@ -128,7 +128,7 @@ test("a closed session the app doesn't know is resumed from its own folder", asy
 });
 
 test("a session still running in a terminal is brought to the front there, not resumed in the app", async () => {
-  const refusal = { ok: false as const, error: "running outside the desktop app (cli, pid 7): open it in its terminal", inTerminal: true };
+  const refusal = { ok: false as const, error: "running outside the desktop app (cli, pid 7): open it in its terminal", inTerminal: true as const };
   const hub = new SessionHub(new Store(), Date.now, false);
   const asked: string[] = [];
   const host = desktopHost(hub, {
