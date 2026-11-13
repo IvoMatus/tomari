@@ -52,10 +52,10 @@ Para agregar otra terminal hay que implementar la interfaz `SessionHost` de [`ag
 Para desarrollo hay un atajo que no instala nada ni arranca al iniciar sesión:
 
 ```bash
-bin/perch-up                          # compila lo que cambió y levanta el agente y la franja en segundo plano
-bin/perch-down                        # los detiene
-.build/perch-terminal/perch status    # host en uso, ¿responde el agente?, ¿están los hooks?
-.build/perch-terminal/perch host app  # cambia de host con el agente corriendo
+bin/tomari-up                          # compila lo que cambió y levanta el agente y la franja en segundo plano
+bin/tomari-down                        # los detiene
+.build/tomari/tomari status    # host en uso, ¿responde el agente?, ¿están los hooks?
+.build/tomari/tomari host app  # cambia de host con el agente corriendo
 ```
 
 Necesita Bun y las Command Line Tools de Xcode. El resto de este README describe el Tomari original; `npx @elrincondeldev/tomari`, `npm/`, `scripts/release.ts` y el workflow de release no se usan en este fork.

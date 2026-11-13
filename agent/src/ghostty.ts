@@ -77,8 +77,8 @@ export async function focusPanel(ttys: string[]): Promise<boolean> {
   return (await osascript(FOCUS_SCRIPT, ttys)) === "focused";
 }
 
-/** Marker in the watcher's command line, so bin/perch-down can find a stray watcher. */
-export const WATCHER_MARKER = "perch-terminal focus watcher";
+/** Marker in the watcher's command line, so bin/tomari-down can find a stray watcher. */
+export const WATCHER_MARKER = "tomari focus watcher";
 
 /**
  * JXA that prints the tty of the front window's focused panel every `seconds`, empty when there

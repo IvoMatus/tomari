@@ -1,10 +1,10 @@
 #!/bin/bash
-# Stops what bin/perch-up started: the strip, the agent and the agent's Ghostty focus watcher.
+# Stops what bin/tomari-up started: the strip, the agent and the agent's Ghostty focus watcher.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="$HOME/Library/Application Support/perch-terminal"
-AGENT="$ROOT/.build/perch-terminal/perch"
+AGENT="$ROOT/.build/tomari/tomari"
 OVERLAY="$ROOT/.build/release/tomari-overlay"
 
 # running <pid file> <binary>: prints the pid when that binary runs under it.
@@ -36,4 +36,4 @@ stop "strip" "$DATA/overlay.pid" "$OVERLAY"
 stop "agent" "$DATA/agent.pid" "$AGENT"
 
 # The agent stops its watcher on the way out; this catches one left behind by a crash.
-if pkill -f "perch-terminal focus watcher"; then echo "focus watcher: stopped a leftover one"; fi
+if pkill -f "tomari focus watcher"; then echo "focus watcher: stopped a leftover one"; fi

@@ -23,7 +23,7 @@ export const USAGE = `Usage: tomari <command>
   hooks                        print the host's settings.json with the hooks added, without writing it
   hooks --install | --remove   add or remove the hooks in that file, after backing it up
   uninstall [--purge]          remove everything; --purge also deletes pins and icons without asking
-  agent [--lan]                run the agent in the foreground (what the LaunchAgent and bin/perch-up run)
+  agent [--lan]                run the agent in the foreground (what the LaunchAgent and bin/tomari-up run)
   version                      print the version`;
 
 const FLAGS: Record<string, Record<string, string>> = {

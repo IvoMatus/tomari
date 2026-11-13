@@ -1,12 +1,12 @@
 #!/bin/bash
-# Starts perch-terminal by hand: builds what changed, then runs the agent and the strip in the
+# Starts Tomari by hand: builds what changed, then runs the agent and the strip in the
 # background, logging to ~/Library/Logs/perch-terminal. Nothing here starts at login.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="$HOME/Library/Application Support/perch-terminal"
 LOGS="$HOME/Library/Logs/perch-terminal"
-AGENT="$ROOT/.build/perch-terminal/perch"
+AGENT="$ROOT/.build/tomari/tomari"
 OVERLAY="$ROOT/.build/release/tomari-overlay"
 PANEL_PORT=7778
 # The agent runs `claude agents`, osascript and ps.
@@ -49,7 +49,7 @@ fi
 
 if [[ $rebuilt == 1 ]] && { running "$DATA/agent.pid" "$AGENT" || running "$DATA/overlay.pid" "$OVERLAY"; } >/dev/null; then
   echo "restarting with the new build…"
-  "$ROOT/bin/perch-down" >/dev/null
+  "$ROOT/bin/tomari-down" >/dev/null
 fi
 
 if pid="$(running "$DATA/agent.pid" "$AGENT")"; then

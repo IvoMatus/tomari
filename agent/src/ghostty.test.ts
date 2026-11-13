@@ -56,7 +56,7 @@ describe("focus watcher script", () => {
     expect(parseWatcherLine("execution error: Ghostty got an error (-1743)")).toBeUndefined();
   });
 
-  test("checks that Ghostty runs before asking it, stops with its agent, and carries the marker perch-down looks for", () => {
+  test("checks that Ghostty runs before asking it, stops with its agent, and carries the marker tomari-down looks for", () => {
     const script = watcherScript(2);
     expect(script).toContain(WATCHER_MARKER);
     expect(script).toContain("if (ghostty.running())");

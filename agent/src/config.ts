@@ -2,7 +2,7 @@
  * Where perch-terminal lives on disk, apart from an install of the original Tomari. The data dir
  * holds config.json with the pairing token (created on first run, mode 600) and the session host,
  * perch.db the SQLite store, bin/ the binaries the LaunchAgents run, and the pid files of
- * bin/perch-up. The overlay reads the token from here too (Sources/TomariCore/AgentConfig.swift).
+ * bin/tomari-up. The overlay reads the token from here too (Sources/TomariCore/AgentConfig.swift).
  */
 import { $ } from "bun";
 import { randomBytes } from "node:crypto";
